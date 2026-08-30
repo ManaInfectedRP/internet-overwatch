@@ -6,6 +6,14 @@
 
 <p align="center"><em>Monitor. Analyze. Protect. Play.</em></p>
 
+<p align="center">
+  <a href="https://github.com/ManaInfectedRP/internet-overwatch/actions/workflows/build.yml">
+    <img src="https://github.com/ManaInfectedRP/internet-overwatch/actions/workflows/build.yml/badge.svg" alt="Build">
+  </a>
+  <img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11+">
+  <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT">
+</p>
+
 A desktop network monitor that answers one question properly:
 
 > **Why am I lagging?**
@@ -151,7 +159,19 @@ python -m app.main --simulate destination_spikes
 
 ---
 
-## Building a Windows executable
+## Getting a Windows executable
+
+### Download a build
+
+Every push and pull request builds the executable in CI. Open the
+**Actions** tab, pick the latest **Build** run, and download the
+`InternetOverwatch-windows` artifact. Tagged releases (`v*`) also attach the
+executable to the GitHub release.
+
+CI runs the executable for a real monitoring session before uploading it, so a
+build that cannot start never becomes an artifact.
+
+### Build it yourself
 
 ```bash
 pip install pyinstaller
@@ -159,8 +179,13 @@ python -m app.utils.assets          # regenerate assets/icons/app_icon.ico from 
 pyinstaller internet_overwatch.spec
 ```
 
-The result is `dist/InternetOverwatch.exe`. "Start when I sign in" is available
-in Settings and registers a per-user entry that is trivial to remove.
+The result is `dist/InternetOverwatch.exe` (~64 MB, single file, no Python
+needed on the target machine).
+
+The executable is portable: it keeps `data/` and `logs/` beside itself, and
+falls back to your user application-data directory if that location is
+read-only. "Start when I sign in" is available in Settings and registers a
+per-user entry that is trivial to remove.
 
 ---
 
