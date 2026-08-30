@@ -113,12 +113,22 @@ def analyse_local(
         report.summary = "Local network unreachable"
         return report
 
+    if primary.spike_count:
+        report.lines.append(f"Gateway spikes: {primary.spike_count}")
+
     latency = primary.average_ms or 0.0
     loss = primary.loss_fraction
-    if latency >= GATEWAY_LATENCY_PROBLEM_MS or loss >= settings.loss_warning:
+    # A router that spikes is a local problem even when its average looks fine,
+    # which is exactly the comparison plan section 97 asks for.
+    spiking = primary.spike_count > 0 and primary.status == NodeStatus.PROBLEM
+    if latency >= GATEWAY_LATENCY_PROBLEM_MS or loss >= settings.loss_warning or spiking:
         report.status = NodeStatus.PROBLEM
         report.summary = "Possible local network issue"
-    elif latency >= GATEWAY_LATENCY_WARNING_MS or loss > 0:
+    elif (
+        latency >= GATEWAY_LATENCY_WARNING_MS
+        or loss > 0
+        or primary.status == NodeStatus.WARNING
+    ):
         report.status = NodeStatus.WARNING
         report.summary = "Local network shows mild degradation"
     else:
@@ -148,9 +158,14 @@ def analyse_internet(
     if len(unreachable) == len(active):
         report.status = NodeStatus.PROBLEM
         report.summary = "Internet unreachable"
-    elif len(degraded) >= 2 or (len(active) == 1 and degraded):
-        report.status = NodeStatus.PROBLEM if len(unreachable) else NodeStatus.WARNING
+    elif len(degraded) >= 2:
+        # Independent public targets degrading together is the signature of an
+        # upstream problem rather than a coincidence (plan section 18).
+        report.status = NodeStatus.PROBLEM
         report.summary = "Multiple public targets are degraded"
+    elif len(active) == 1 and degraded:
+        report.status = degraded[0].status
+        report.summary = "The only public target is degraded"
     elif degraded:
         report.status = NodeStatus.WARNING
         report.summary = "One public target is degraded"

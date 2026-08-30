@@ -9,6 +9,13 @@ venv/
 .coverage
 htmlcov/
 data/*.db
+data/*.db-wal
+data/*.db-shm
 data/*.db-journal
-logs/*.log
+data/settings.json
+logs/*.log*
+logs/
 *.spec.bak
+
+# Local build/test artefacts
+shots/

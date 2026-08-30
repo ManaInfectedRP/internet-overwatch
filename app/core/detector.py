@@ -200,7 +200,11 @@ class TargetDetector:
             return None
         if measurement.latency_ms < baseline * self.settings.spike_multiplier:
             return None
-        return classify_severity(deviation, self.settings.severity_thresholds())
+        severity = classify_severity(deviation, self.settings.severity_thresholds())
+        # The detection threshold and the severity bands are configured
+        # independently. If the user tunes detection below the minor band, the
+        # spike is still a spike - it just lands in the lowest bucket.
+        return severity or Severity.MINOR
 
     def _extend_incident(
         self, measurement: Measurement, baseline: float | None, severity: Severity
@@ -290,8 +294,33 @@ class TargetDetector:
             stats.current_ms = last.latency_ms if last.success else None
         return stats
 
+    def recent_spike_count(self, seconds: float = 60.0) -> int:
+        """Spikes seen in the last `seconds` of samples."""
+        if not self.recent:
+            return 0
+        cutoff = self.recent[-1].timestamp - seconds
+        return sum(1 for m in self.recent if m.timestamp >= cutoff and m.is_spike)
+
+    def sustained_degradation(self, factor: float = 1.6) -> bool:
+        """Detect a slow, spike-free rise in latency (plan section 87).
+
+        The rolling baseline follows a gradual increase, so no sample ever
+        looks like a spike. Comparing the recent window against the calmest
+        part of the session catches the degradation the spike rule misses.
+        """
+        if len(self._all_latencies) < MIN_BASELINE_SAMPLES * 3:
+            return False
+        recent = self._all_latencies[-self.settings.rolling_window:]
+        if len(recent) < MIN_BASELINE_SAMPLES:
+            return False
+        recent_median = statistics.median(recent)
+        floor = statistics.median(sorted(self._all_latencies)[: max(5, len(self._all_latencies) // 4)])
+        if floor <= 0:
+            return False
+        return recent_median > floor * factor and (recent_median - floor) >= 20.0
+
     def status(self, stats: TargetStats | None = None) -> NodeStatus:
-        """Traffic-light status for this target (plan sections 12, 72)."""
+        """Traffic-light status for this target (plan sections 12, 21, 72)."""
         from app.config.defaults import (
             GATEWAY_LATENCY_PROBLEM_MS,
             GATEWAY_LATENCY_WARNING_MS,
@@ -305,7 +334,9 @@ class TargetDetector:
             return NodeStatus.PROBLEM
 
         stats = stats or self.stats(window=self.settings.loss_window_samples)
-        latency = stats.current_ms if stats.current_ms is not None else stats.average_ms
+        # The window average, not the last sample: a single lucky probe should
+        # not turn a struggling target green.
+        latency = stats.average_ms if stats.average_ms is not None else stats.current_ms
         if latency is None:
             return NodeStatus.PROBLEM
 
@@ -315,13 +346,18 @@ class TargetDetector:
             warn, problem = LATENCY_WARNING_MS, LATENCY_PROBLEM_MS
 
         loss = self.loss_fraction
-        if loss >= self.settings.loss_warning or latency >= problem:
-            return NodeStatus.PROBLEM
-        if loss >= self.settings.loss_minor or latency >= warn:
-            return NodeStatus.WARNING
-
         jitter = self.jitter_ms
-        if jitter is not None and jitter >= self.settings.jitter_warning_ms:
+        spikes = self.recent_spike_count()
+
+        if loss >= self.settings.loss_warning or latency >= problem or spikes >= 4:
+            return NodeStatus.PROBLEM
+        if (
+            loss >= self.settings.loss_minor
+            or latency >= warn
+            or spikes >= 1
+            or (jitter is not None and jitter >= self.settings.jitter_good_ms)
+            or self.sustained_degradation()
+        ):
             return NodeStatus.WARNING
         return NodeStatus.HEALTHY
 

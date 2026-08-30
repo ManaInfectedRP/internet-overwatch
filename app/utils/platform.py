@@ -71,47 +71,91 @@ def has_command(name: str) -> bool:
     return shutil.which(name) is not None
 
 
+def is_frozen() -> bool:
+    """True when running from a PyInstaller bundle rather than from source."""
+    return getattr(sys, "frozen", False)
+
+
+def bundle_dir() -> Path | None:
+    """PyInstaller's temporary extraction directory, if we are inside one.
+
+    Anything written here is destroyed when the process exits, so it must never
+    be used for the database, settings or logs.
+    """
+    meipass = getattr(sys, "_MEIPASS", None)
+    return Path(meipass) if meipass else None
+
+
 def app_root() -> Path:
-    """Root directory of the application source tree."""
+    """Directory the application is installed in.
+
+    From source this is the repository root. From a frozen build it is the
+    folder holding the .exe - not the temporary extraction directory, which
+    `__file__` would otherwise point into.
+    """
+    if is_frozen():
+        return Path(sys.executable).resolve().parent
     return Path(__file__).resolve().parents[2]
 
 
-def user_data_dir() -> Path:
-    """Writable directory for the database, config and logs.
-
-    Uses a directory next to the source tree when writable (portable mode),
-    otherwise falls back to the per-user application data directory.
-    """
-    portable = app_root() / "data"
+def _is_writable(directory: Path) -> bool:
+    """Whether we can actually create files in `directory`."""
     try:
-        portable.mkdir(parents=True, exist_ok=True)
-        probe = portable / ".write_test"
+        directory.mkdir(parents=True, exist_ok=True)
+        probe = directory / ".write_test"
         probe.write_text("ok", encoding="utf-8")
         probe.unlink()
-        return portable
+        return True
     except OSError:
-        pass
+        return False
 
+
+def _platform_data_dir() -> Path:
     if IS_WINDOWS:
         base = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming"))
     elif IS_MACOS:
         base = Path.home() / "Library" / "Application Support"
     else:
         base = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
-    target = base / "InternetOverwatch"
+    return base / "InternetOverwatch"
+
+
+def user_data_dir() -> Path:
+    """Writable directory for the database, config and logs.
+
+    Prefers a `data/` folder beside the application (portable mode) and falls
+    back to the per-user application-data directory when that is read-only,
+    which is the normal case for an install under Program Files.
+    """
+    portable = app_root() / "data"
+    bundle = bundle_dir()
+    # Guard against the portable path resolving inside the bundle's temporary
+    # extraction directory, which is wiped when the process exits.
+    inside_bundle = bundle is not None and (
+        portable == bundle or bundle in portable.parents
+    )
+    if not inside_bundle and _is_writable(portable):
+        return portable
+
+    target = _platform_data_dir()
     target.mkdir(parents=True, exist_ok=True)
     return target
 
 
 def log_dir() -> Path:
-    d = user_data_dir().parent / "logs"
+    """Directory for application logs, alongside the data directory."""
+    data = user_data_dir()
+    # In portable mode data/ sits under the app root, so logs/ becomes its
+    # sibling. Otherwise keep logs inside the per-user data directory rather
+    # than scattering them into its parent.
+    candidate = app_root() / "logs" if data.parent == app_root() else data / "logs"
     try:
-        d.mkdir(parents=True, exist_ok=True)
-        return d
+        candidate.mkdir(parents=True, exist_ok=True)
+        return candidate
     except OSError:  # pragma: no cover - defensive
-        d = user_data_dir() / "logs"
-        d.mkdir(parents=True, exist_ok=True)
-        return d
+        fallback = _platform_data_dir() / "logs"
+        fallback.mkdir(parents=True, exist_ok=True)
+        return fallback
 
 
 def open_in_file_manager(path: Path) -> bool:
