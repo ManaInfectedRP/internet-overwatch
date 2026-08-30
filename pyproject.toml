@@ -36,7 +36,7 @@ packaging = ["pyinstaller>=6.0"]
 internet-overwatch = "app.main:main"
 
 [project.urls]
-Homepage = "https://github.com/internet-overwatch/internet-overwatch"
+Homepage = "https://github.com/ManaInfectedRP/internet-overwatch"
 
 [tool.setuptools.packages.find]
 include = ["app*"]

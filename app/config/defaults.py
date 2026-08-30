@@ -296,6 +296,22 @@ DEFAULT_MIN_NOTIFY_SEVERITY = Severity.SEVERE
 # --------------------------------------------------------------------------
 # Default targets (plan section 96)
 # --------------------------------------------------------------------------
+
+# Game destinations monitored out of the box. Plan section 76 warns against
+# guessing game server addresses; both of these were supplied by the user.
+#
+# Both answer ICMP, so echo RTT is used. TCP connect was measured against each
+# game port first: 20482 on the login host completes the handshake (~25 ms),
+# while 6112 on the realm host is filtered and always times out - so neither is
+# used as the monitoring protocol, and the ports are kept only as reference.
+DEFAULT_GAME_NAME = "PoE Login (Stockholm)"
+DEFAULT_GAME_HOST = "sto.login.pathofexile.com"
+DEFAULT_GAME_PORT = 20482
+
+DEFAULT_GAME_REALM_NAME = "PoE Realm"
+DEFAULT_GAME_REALM_HOST = "109.200.195.13"
+DEFAULT_GAME_REALM_PORT = 6112
+
 DEFAULT_TARGETS = [
     {
         "name": "Router",
@@ -323,6 +339,30 @@ DEFAULT_TARGETS = [
         "interval_ms": DEFAULT_INTERNET_INTERVAL_MS,
         "enabled": True,
         "category": TargetCategory.INTERNET.value,
+    },
+    {
+        # This host answers ICMP, so echo RTT is used rather than TCP connect
+        # time. The game port is kept on the target so the protocol can be
+        # switched to TCP from the Targets page without retyping anything.
+        "name": DEFAULT_GAME_NAME,
+        "host": DEFAULT_GAME_HOST,
+        "port": DEFAULT_GAME_PORT,
+        "protocol": Protocol.ICMP.value,
+        "interval_ms": DEFAULT_CUSTOM_INTERVAL_MS,
+        "enabled": True,
+        "category": TargetCategory.CUSTOM.value,
+    },
+    {
+        # Monitoring the realm separately from the login host is what
+        # distinguishes "login infrastructure is slow" from "the route to the
+        # realm I actually play on is slow".
+        "name": DEFAULT_GAME_REALM_NAME,
+        "host": DEFAULT_GAME_REALM_HOST,
+        "port": DEFAULT_GAME_REALM_PORT,
+        "protocol": Protocol.ICMP.value,
+        "interval_ms": DEFAULT_CUSTOM_INTERVAL_MS,
+        "enabled": True,
+        "category": TargetCategory.CUSTOM.value,
     },
 ]
 

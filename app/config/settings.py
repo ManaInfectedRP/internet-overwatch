@@ -45,6 +45,8 @@ class MonitoringSettings:
     ip_version: str = D.IPVersion.AUTO.value
     auto_start_monitoring: bool = True
     system_sampling_enabled: bool = True
+    start_with_system: bool = False
+    start_minimised: bool = False
 
     def clamp(self) -> None:
         self.gateway_interval_ms = max(D.MIN_INTERVAL_MS, int(self.gateway_interval_ms))
