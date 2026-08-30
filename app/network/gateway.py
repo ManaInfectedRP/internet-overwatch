@@ -115,7 +115,9 @@ def _detect_windows_ipconfig() -> GatewayInfo:
             continue
         looks_like_gateway = any(
             token in label
-            for token in ("gateway", "gateway", "standardgateway", "passerelle", "vagg")
+            # "gateway" also covers the Swedish and German spellings
+            # (Standard-gateway / Standardgateway).
+            for token in ("gateway", "passerelle", "puerta de enlace")
         )
         if looks_like_gateway or label.endswith("gateway"):
             gw = _valid_gateway(value)

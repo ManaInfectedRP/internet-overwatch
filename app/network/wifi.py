@@ -83,7 +83,10 @@ def _band_from_channel(channel: str | None) -> str | None:
     if not channel:
         return None
     try:
-        number = int(re.sub(r"\D", "", channel) or 0)
+        # macOS reports "36,1" (channel,width) and Linux sometimes appends a
+        # band suffix, so keep only the leading channel number.
+        head = re.split(r"[,\s/]", channel.strip(), maxsplit=1)[0]
+        number = int(re.sub(r"\D", "", head) or 0)
     except ValueError:
         return None
     if 1 <= number <= 14:
@@ -208,25 +211,34 @@ def _linux_wifi() -> WifiInfo:
     return WifiInfo(available=False, note="No Wi-Fi tooling found (nmcli / iwconfig)")
 
 
-def _macos_wifi() -> WifiInfo:
-    airport = (
-        "/System/Library/PrivateFrameworks/Apple80211.framework/Versions/"
-        "Current/Resources/airport"
-    )
-    code, out, _ = run_command([airport, "-I"], timeout=6)
-    if code != 0:
-        return WifiInfo(available=False, note="Wi-Fi information unavailable")
-    info = WifiInfo(available=True, connected=True)
-    for raw in out.splitlines():
+AIRPORT_BINARY = (
+    "/System/Library/PrivateFrameworks/Apple80211.framework/Versions/"
+    "Current/Resources/airport"
+)
+
+
+def _parse_airport(output: str) -> WifiInfo:
+    """Parse `airport -I` output.
+
+    Field names come from the tool verbatim: `agrCtlRSSI`, `lastTxRate`,
+    `maxRate`, `state`. Values are matched on the first colon, which keeps a
+    BSSID's own colons intact.
+    """
+    info = WifiInfo(available=True)
+    for raw in output.splitlines():
         if ":" not in raw:
             continue
         label, _, value = raw.partition(":")
         label = label.strip().lower()
         value = value.strip()
+        if not value:
+            continue
         if label == "ssid":
             info.ssid = value
         elif label == "bssid":
             info.bssid = value
+        elif label == "state":
+            info.connected = value.lower() in ("running", "associated")
         elif label == "agrctlrssi":
             try:
                 info.signal_dbm = int(value)
@@ -235,10 +247,32 @@ def _macos_wifi() -> WifiInfo:
                 pass
         elif label == "channel":
             info.channel = value
-        elif label == "lastturate":
+        elif label == "lasttxrate":
             info.receive_rate_mbps = _first_float(value)
+        elif label == "maxrate":
+            info.transmit_rate_mbps = _first_float(value)
+        elif label == "link auth":
+            info.authentication = value
     info.band = _band_from_channel(info.channel)
     return info
+
+
+def _macos_wifi() -> WifiInfo:
+    code, out, err = run_command([AIRPORT_BINARY, "-I"], timeout=6)
+    text = out + err
+
+    # Apple deprecated the airport tool in macOS 14.4; on newer systems it
+    # either refuses to run or prints only a deprecation notice. Say so rather
+    # than reporting an "available" adapter with every field empty.
+    if code != 0 or "SSID" not in out:
+        if "deprecat" in text.lower():
+            return WifiInfo(
+                available=False,
+                note="Wi-Fi details unavailable: the macOS airport tool is deprecated",
+            )
+        return WifiInfo(available=False, note="Wi-Fi information unavailable")
+
+    return _parse_airport(out)
 
 
 def get_wifi_info() -> WifiInfo:

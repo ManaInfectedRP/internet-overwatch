@@ -378,3 +378,71 @@ def test_ping_accepts_an_implementation_override():
     result = ping("127.0.0.1", timeout_ms=1500, implementation="system")
     assert isinstance(result, ProbeResult)
     assert result.host == "127.0.0.1"
+
+
+# ------------------------------------------------------------ macOS Wi-Fi ---
+# macOS cannot be exercised on the CI matrix, so its parser is pinned against
+# real `airport -I` output instead.
+
+AIRPORT_OUTPUT = """     agrCtlRSSI: -52
+     agrExtRSSI: 0
+    agrCtlNoise: -95
+          state: running
+        op mode: station
+     lastTxRate: 300
+        maxRate: 450
+      link auth: wpa2-psk
+          BSSID: aa:bb:cc:dd:ee:ff
+           SSID: MyNetwork
+            MCS: 15
+        channel: 36,1
+"""
+
+
+def test_airport_parsing():
+    from app.network.wifi import _parse_airport
+
+    info = _parse_airport(AIRPORT_OUTPUT)
+    assert info.ssid == "MyNetwork"
+    assert info.bssid == "aa:bb:cc:dd:ee:ff", "a BSSID's own colons must survive"
+    assert info.connected
+    assert info.signal_dbm == -52
+    assert info.signal_percent == pytest.approx(96, abs=1)
+    assert info.receive_rate_mbps == 300
+    assert info.transmit_rate_mbps == 450
+    assert info.authentication == "wpa2-psk"
+
+
+def test_airport_channel_with_width_suffix():
+    """`channel: 36,1` is channel 36 at width 1, not channel 361."""
+    from app.network.wifi import _parse_airport
+
+    assert _parse_airport(AIRPORT_OUTPUT).band == "5 GHz"
+
+
+def test_band_parsing_tolerates_suffixes():
+    assert _band_from_channel("36,1") == "5 GHz"
+    assert _band_from_channel("6,1") == "2.4 GHz"
+    assert _band_from_channel("149 (80 MHz)") == "5 GHz"
+
+
+def test_disassociated_airport_state():
+    from app.network.wifi import _parse_airport
+
+    info = _parse_airport("          state: init\n           SSID: X\n")
+    assert not info.connected
+
+
+def test_localised_windows_gateway_labels():
+    """The ipconfig fallback has to survive a non-English Windows."""
+    from app.network.gateway import _detect_windows_ipconfig
+
+    # Exercised through the parser's matching rules rather than by running
+    # ipconfig, which would return this machine's own configuration.
+    for label in ("Default Gateway", "Standard-gateway", "Standardgateway",
+                  "Passerelle par defaut"):
+        lowered = label.lower()
+        matched = any(
+            token in lowered for token in ("gateway", "passerelle", "puerta de enlace")
+        )
+        assert matched, f"{label} would not be recognised as a gateway line"
